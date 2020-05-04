@@ -51,11 +51,11 @@ class Program
         try
         {
             var message = ev.CallbackQuery.Message;
-
+            
             if (ev.CallbackQuery.Data.Contains("more"))
             {
                 var city = ev.CallbackQuery.Data.Split('_').First();
-                await SendMessageWithWeatherInfo(message, GetWeatherInfoAboutCity(city), more: true, MessageId: ev.CallbackQuery.Message.MessageId);
+                await SendMessageWithWeatherInfo(city, message.Chat.Id, GetWeatherInfoAboutCity(city), more: true, MessageId: ev.CallbackQuery.Message.MessageId);
             }
             else if (ev.CallbackQuery.Data.Contains("toworrow"))
             {
@@ -107,10 +107,17 @@ class Program
                     string[] Phrases = { "Секундочку, получаю данные...⏳", "Получаю информацию...📡", "Спрашиваю у синоптика...📲",
                     "Высылаю ответ...🌚"};
                     Random rnd = new Random();
-
-                    await Bot.SendTextMessageAsync(message.Chat.Id, Phrases[rnd.Next(0, Phrases.Count())], disableNotification: false);
-                    await SendMessageWithWeatherInfo(message, info);
-                    await Bot.DeleteMessageAsync(message.Chat.Id, message.MessageId + 1);
+                    try
+                    {
+                        await Bot.SendTextMessageAsync(message.Chat.Id, Phrases[rnd.Next(0, Phrases.Count())], disableNotification: false);
+                        await SendMessageWithWeatherInfo(message.Text, message.Chat.Id, info);
+                        await Bot.DeleteMessageAsync(message.Chat.Id, message.MessageId + 1);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e.Message + "\n" + e.Source + "\n" + e.StackTrace);
+                        Console.WriteLine(new string('-', 140));
+                    }
                 }
 
                 break;
@@ -176,12 +183,13 @@ class Program
             return null;
         }
     }
-    static string GetPicturesByTopic(Message message, bool findMoreGlobal = true)
+
+    static string GetPicturesByTopic(string topic, bool findMoreGlobal = true)
     {
         try
         {
-            var topic = message.Text;
             string url = $"https://pixabay.com/api/?key={PicturesAPIKEY}&q={topic}+город&image_type=photo&orientation=horizontal&category=places&pretty=true";
+
             HttpWebRequest httpWebRequest = (HttpWebRequest)WebRequest.Create(url);
             HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse();
 
@@ -195,6 +203,10 @@ class Program
             Random rnd = new Random();
             return (picturesByTopic.hits.Count > 0) ? picturesByTopic.hits[rnd.Next(0, picturesByTopic.hits.Count)].webformatURL : picturesByTopic.hits.First().webformatURL;
 
+        }
+        catch(InvalidOperationException)
+        {
+            return null;
         }
         catch (Exception e)
         {
@@ -237,9 +249,8 @@ class Program
 
     }
 
-    static async Task SendMessageWithWeatherInfo(Message message, WeatherInfo WeatherInfo, bool more = false, int MessageId = 0)
+    static async Task SendMessageWithWeatherInfo(string message, long ChatId, WeatherInfo WeatherInfo, bool more = false, int MessageId = 0)
     {
-        var ChatId = message.Chat.Id;
         string BotMessage = "";
         var pictureURL = GetPicturesByTopic(message);
 
@@ -247,11 +258,11 @@ class Program
         {
             new [] // first row
             {
-                InlineKeyboardButton.WithCallbackData("Больше информации о погоде", $"{message.Text}_more")
+                InlineKeyboardButton.WithCallbackData("Больше информации о погоде", $"{message}_more")
             },
             new [] // second row
             {
-                InlineKeyboardButton.WithCallbackData("Прогноз на завтра", $"{message.Text}_tomorrow")
+                InlineKeyboardButton.WithCallbackData("Прогноз на завтра", $"{message}_tomorrow")
             }
         });
 
@@ -277,7 +288,7 @@ class Program
                        replyMarkup: keyboard
                        );
                 }
-                else
+                else if (pictureURL == null)
                 {
                     await Bot.SendTextMessageAsync
                         (
@@ -290,6 +301,13 @@ class Program
             }
             else
             {
+                var keyboardWithMoreInfo = new InlineKeyboardMarkup(new[]
+                {
+                    new [] // second row
+                    {
+                        InlineKeyboardButton.WithCallbackData("Прогноз на завтра", $"{message}_tomorrow")
+                    }
+                });
                 BotMessage = $"Погода в городе: {WeatherInfo.name}" +
                 $"\nСейчас {WeatherInfo.weather[0].description}" +
                 $"\nТемпература {(int)WeatherInfo.main.temp}°" +
@@ -306,26 +324,23 @@ class Program
 
                 if (pictureURL != null)
                 {
-                    Console.WriteLine("works");
                     await Bot.SendPhotoAsync
                         (
                         ChatId,
                         photo: pictureURL,
                         caption: BotMessage,
                         disableNotification: false,
-                        replyMarkup: keyboard
+                        replyMarkup: keyboardWithMoreInfo
                         );
                 }
-                else
+                else if(pictureURL== null)
                 {
-                    Console.WriteLine("doesn`t works");
-
                     await Bot.SendTextMessageAsync
                         (
                         chatId: ChatId,
                         text: BotMessage,
                         disableNotification: false,
-                        replyMarkup: keyboard
+                        replyMarkup: keyboardWithMoreInfo
                         );
                 }
             }
