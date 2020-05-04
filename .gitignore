@@ -3,6 +3,7 @@
 
 ## Tokens and ApiKeys
 SensitiveInfo/
+keys/
 
 # User-specific files
 *.suo
