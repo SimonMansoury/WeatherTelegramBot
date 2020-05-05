@@ -2,18 +2,16 @@
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
-
 using Newtonsoft.Json;
-
 using Telegram.Bot;
 using Telegram.Bot.Args;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
-
-using WeatherBot;
-using WeatherBot.ClassesforWeatherInfo.ClassesForForecast;
+using WeatherBot.ClassesforWeatherInfo;
 using WeatherBot.PictureClasses;
 
 class Program
@@ -44,35 +42,6 @@ class Program
         Console.ReadLine();
         Bot.StopReceiving();
     }
-
-
-    static async void BotOnButtonClick(object sc, CallbackQueryEventArgs ev)
-    {
-        try
-        {
-            var message = ev.CallbackQuery.Message;
-            
-            if (ev.CallbackQuery.Data.Contains("more"))
-            {
-                var city = ev.CallbackQuery.Data.Split('_').First();
-                await SendMessageWithWeatherInfo(city, message.Chat.Id, GetWeatherInfoAboutCity(city), more: true, MessageId: ev.CallbackQuery.Message.MessageId);
-            }
-            else if (ev.CallbackQuery.Data.Contains("toworrow"))
-            {
-                var city = ev.CallbackQuery.Data.Split('_').First();
-                await SendMessageWithWeatherInfo(message, GetWeatherInfoAboutCity(message, 1));
-            }
-            else
-            {
-                Console.WriteLine("ERROR!");
-            }
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine(e.Message + "\n" + e.Source + "\n" + e.StackTrace);
-            Console.WriteLine(new string('-', 140));
-        }
-    }
     static async void BotOnMessageReceived(object sender, MessageEventArgs messageEventArgs)
     {
         var message = messageEventArgs.Message;
@@ -91,6 +60,7 @@ class Program
                 await HelpMessage(message);
                 break;
             default:
+
                 var info = GetWeatherInfoAboutCity(message.Text);
 
                 if (info == null)
@@ -123,22 +93,60 @@ class Program
                 break;
         }
     }
-    static async Task StartMessage(Message message)
-    {
-        var ChatId = message.Chat.Id;
-        await Bot.SendTextMessageAsync(ChatId, "Привет! Этот бот поможет тебе узнавать погоду ☀️💦❄️🌤 в твоем городе, для этого" +
-           " пришли мне название города, погода в котором, тебя интересует");
-    }
-    static async Task HelpMessage(Message message)
-    {
-        var ChatId = message.Chat.Id;
-        await Bot.SendTextMessageAsync(ChatId, "Помощь");
-    }
-    static Forecast GetWeatherInfoAboutCity(Message message, int days)
+    static async void BotOnButtonClick(object sc, CallbackQueryEventArgs ev)
     {
         try
         {
-            var url = $"http://api.openweathermap.org/data/2.5/forecast/daily?q={message.Text}&cnt={days}&units=metric&lang=ru&appid={WeatherAPIKEY}";
+            var message = ev.CallbackQuery.Message;
+            var city = ev.CallbackQuery.Data.Split('_').First();
+
+            if (ev.CallbackQuery.Data.Contains("forecast"))
+            {
+                int daysNum = int.Parse(ev.CallbackQuery.Data.Last().ToString());
+
+                await SendMessageWithWeatherInfo(message, GetWeatherInfoAboutCity(city, daysNum));
+            }
+            else if (ev.CallbackQuery.Data.Contains("_more"))
+            {
+                await SendMessageWithWeatherInfo(city, message.Chat.Id, GetWeatherInfoAboutCity(city), more: true, MessageId: ev.CallbackQuery.Message.MessageId);
+            }
+            else if (ev.CallbackQuery.Data.Contains("_tomorrow"))
+            {
+                await Bot.DeleteMessageAsync(message.Chat.Id, message.MessageId);
+
+                var days = new InlineKeyboardMarkup(new[]
+                {
+                    new [] // first row
+                    {
+                        InlineKeyboardButton.WithCallbackData("Прогноз на завтра", $"{city}_forecast1"),
+                        InlineKeyboardButton.WithCallbackData("Прогноз на 3 дня", $"{city}_forecast3")
+                    }
+                });
+
+                await Bot.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "На сколько дней прислать прогноз? 🤔",
+                    disableNotification: true,
+                    replyMarkup: days
+                    );
+            }
+            else
+            {
+                Console.WriteLine(ev.CallbackQuery.Data);
+                Console.WriteLine("ERROR! Strange Callback Data");
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.Message + "\n" + e.Source + "\n" + e.StackTrace);
+            Console.WriteLine(new string('-', 140));
+        }
+    }
+    static WeatherForecast GetWeatherInfoAboutCity(string city, int days)
+    {
+        try
+        {
+            var url = $"http://api.weatherapi.com/v1/forecast.json?key={WeatherAPIKEY}&q={city}&days={days}&lang=ru";
 
             HttpWebRequest httpWebRequest = (HttpWebRequest)WebRequest.Create(url);
             HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse();
@@ -148,7 +156,7 @@ class Program
             {
                 response = stream.ReadToEnd();
             }
-            Forecast Forecast = JsonConvert.DeserializeObject<Forecast>(response);
+            WeatherForecast Forecast = JsonConvert.DeserializeObject<WeatherForecast>(response);
             return Forecast;
         }
         catch (Exception e)
@@ -159,13 +167,12 @@ class Program
         }
 
     }
-    static WeatherInfo GetWeatherInfoAboutCity(string city)
+    static Weather GetWeatherInfoAboutCity(string city)
     {
-
         try
         {
             string response;
-            var url = $"http://api.openweathermap.org/data/2.5/weather?q={city}&units=metric&lang=ru&appid={WeatherAPIKEY}";
+            var url = $"http://api.weatherapi.com/v1/current.json?key={WeatherAPIKEY}&q={city}&lang=ru";
 
             HttpWebRequest httpWebRequest = (HttpWebRequest)WebRequest.Create(url);
             HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse();
@@ -173,17 +180,21 @@ class Program
             {
                 response = stream.ReadToEnd();
             }
-            WeatherInfo weatherInfo = JsonConvert.DeserializeObject<WeatherInfo>(response);
+            Weather weatherInfo = JsonConvert.DeserializeObject<Weather>(response);
             return weatherInfo;
+        }
+        catch(WebException)
+        {
+            Console.WriteLine($"Couldn`t find city - {city}");
+            return null;
         }
         catch (Exception e)
         {
-            Console.WriteLine(e.Message + "\n" + e.Source + "\n" + e.StackTrace);
+            Console.WriteLine(e.GetType() + "\n" + e.Source + "\n" + e.StackTrace);
             Console.WriteLine(new string('-', 140));
             return null;
         }
     }
-
     static string GetPicturesByTopic(string topic, bool findMoreGlobal = true)
     {
         try
@@ -216,40 +227,35 @@ class Program
         }
 
     }
-    static async Task SendMessageWithWeatherInfo(Message message, Forecast WeatherForecast)
+
+    static async Task SendMessageWithWeatherInfo(Message message, WeatherForecast WeatherForecast)
     {
-        var ChatId = message.Chat.Id;
-        var BotMessage = $"Прогноз в городе {WeatherForecast.city}";
-        foreach (var dateTime in WeatherForecast.list)
+        try
         {
-            Console.WriteLine(dateTime.dt);
+            await Bot.DeleteMessageAsync(message.Chat.Id, message.MessageId);
+
+            var ChatId = message.Chat.Id;
+            var BotMessage = new StringBuilder($"Прогноз в городе {WeatherForecast.location.name}, {WeatherForecast.location.country}\n");
+            BotMessage.Append(new string('-', 70) + "\n");
+
+            foreach (var forecast in WeatherForecast.forecast.forecastday)
+            {
+                BotMessage.Append($"{forecast.date}: " +
+                    $"\t{forecast.day.condition.text}\n" +
+                    $"\tТемпература {(int)forecast.day.avgtemp_c}°\n" +
+                    $"\tМаксимальная {(int)forecast.day.maxtemp_c}°\n" +
+                    $"\tШанс выпадения осадков {forecast.day.daily_chance_of_rain}%\n" + new string('-', 70) + "\n");
+            }
+
+            await Bot.SendTextMessageAsync(ChatId, BotMessage.ToString(), disableNotification: true);
         }
-
+        catch (Exception e)
+        {
+            Console.WriteLine(e.Message + "\n" + e.Source + "\n" + e.StackTrace);
+            Console.WriteLine(new string('-', 140));
+        }
     }
-    static string WindDirection(int deg)
-    {
-        if (deg == 0 && deg == 360)
-            return "Северный";
-        else if (deg > 0 && deg < 90)
-            return "Северо-Восточный";
-        else if (deg == 90)
-            return "Восточный";
-        else if (deg > 90 && deg < 180)
-            return "Юго-Восточный";
-        else if (deg == 180)
-            return "Южный";
-        else if (deg > 180 && deg < 270)
-            return "Юго-Западный";
-        else if (deg == 270)
-            return "Западный";
-        else if (deg > 270 && deg < 360)
-            return "Северо-Западный";
-        else
-            return "";
-
-    }
-
-    static async Task SendMessageWithWeatherInfo(string message, long ChatId, WeatherInfo WeatherInfo, bool more = false, int MessageId = 0)
+    static async Task SendMessageWithWeatherInfo(string message, long ChatId, Weather Weather, bool more = false, int MessageId = 0)
     {
         string BotMessage = "";
         var pictureURL = GetPicturesByTopic(message);
@@ -262,7 +268,7 @@ class Program
             },
             new [] // second row
             {
-                InlineKeyboardButton.WithCallbackData("Прогноз на завтра", $"{message}_tomorrow")
+                InlineKeyboardButton.WithCallbackData("Прогноз погоды", $"{message}_tomorrow")
             }
         });
 
@@ -270,12 +276,10 @@ class Program
         {
             if (!more)
             {
-
-                BotMessage = $"Погода в городе: {WeatherInfo.name}" +
-                $"\nСейчас {WeatherInfo.weather[0].description}" +
-                $"\nТемпература {(int)WeatherInfo.main.temp}°" +
-                $"\nМаксимальная {(int)WeatherInfo.main.temp_max}°" +
-                $"\nОщущается как {(int)WeatherInfo.main.feels_like}°";
+                BotMessage = $"Погода в городе: {Weather.location.name}, {Weather.location.country}" +
+                $"\nСейчас {Weather.current.condition.text}" +
+                $"\nТемпература {(int)Weather.current.temp_c}°" +
+                $"\nОщущается как {(int)Weather.current.feelslike_c}°";
 
                 if (pictureURL != null)
                 {
@@ -305,20 +309,19 @@ class Program
                 {
                     new [] // second row
                     {
-                        InlineKeyboardButton.WithCallbackData("Прогноз на завтра", $"{message}_tomorrow")
+                        InlineKeyboardButton.WithCallbackData("Прогноз погоды", $"{message}_tomorrow")
                     }
                 });
-                BotMessage = $"Погода в городе: {WeatherInfo.name}" +
-                $"\nСейчас {WeatherInfo.weather[0].description}" +
-                $"\nТемпература {(int)WeatherInfo.main.temp}°" +
-                $"\nМаксимальная {(int)WeatherInfo.main.temp_max}°" +
-                $"\nОщущается как {(int)WeatherInfo.main.feels_like}°" +
-                $"\nВидимость {WeatherInfo.visibility / 1000} км" +
-                $"\nДавление {WeatherInfo.main.pressure} мм ртут. столб." +
-                $"\nВлажность {WeatherInfo.main.humidity}%" +
-                $"\nСкорость ветра {WeatherInfo.wind.speed} м/с" +
-                $"\nНаправление {WindDirection(WeatherInfo.wind.deg)}" +
-                $"\nОблачность: {WeatherInfo.clouds.all}%";
+                BotMessage = $"Погода в городе: {Weather.location.name}, {Weather.location.country}" +
+                $"\nСейчас {Weather.current.condition.text}" +
+                $"\nТемпература {(int)Weather.current.temp_c}°" +
+                $"\nОщущается как {(int)Weather.current.feelslike_c}°" +
+                $"\nВидимость {Weather.current.vis_km} км" +
+                $"\nДавление {Weather.current.pressure_mb} мм ртут. столб." +
+                $"\nВлажность {Weather.current.humidity}%" +
+                $"\nСкорость ветра {(int)(Weather.current.wind_kph / 3.6)} м/с" +
+                $"\nНаправление {WindDirection(Weather.current.wind_degree)}" +
+                $"\nОблачность: {Weather.current.cloud}%";
 
                 await Bot.DeleteMessageAsync(ChatId, MessageId);
 
@@ -351,4 +354,38 @@ class Program
             Console.WriteLine(new string('-', 140));
         }
     }
+    static async Task StartMessage(Message message)
+    {
+        var ChatId = message.Chat.Id;
+        await Bot.SendTextMessageAsync(ChatId, "Привет! Этот бот поможет тебе узнавать погоду ☀️💦❄️🌤 в твоем городе, для этого" +
+           " пришли мне название города, погода в котором, тебя интересует");
+    }
+    static async Task HelpMessage(Message message)
+    {
+        var ChatId = message.Chat.Id;
+        await Bot.SendTextMessageAsync(ChatId, "Помощь");
+    }
+    static string WindDirection(int deg)
+    {
+        if (deg == 0 && deg == 360)
+            return "Северный";
+        else if (deg > 0 && deg < 90)
+            return "Северо-Восточный";
+        else if (deg == 90)
+            return "Восточный";
+        else if (deg > 90 && deg < 180)
+            return "Юго-Восточный";
+        else if (deg == 180)
+            return "Южный";
+        else if (deg > 180 && deg < 270)
+            return "Юго-Западный";
+        else if (deg == 270)
+            return "Западный";
+        else if (deg > 270 && deg < 360)
+            return "Северо-Западный";
+        else
+            return "";
+
+    }
+
 }
